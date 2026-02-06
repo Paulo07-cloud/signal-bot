@@ -1,30 +1,25 @@
-from flask import Flask, jsonify
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "BOT SIYAL POCKET OPTION AP MACHE ✅"
-
-@app.route("/signal")
-def signal():
-    return jsonify({
-        "pair": "EUR/USD",
-        "signal": "BUY",
-        "expiration": "1 MIN"
-    })
-
-if __name__ == "__main__":
-    app.run()
-@app.route("/signal")
-def signal():
-    pair = request.args.get("pair", "EURUSD")
-
-    data = {
+# Yon fonksyon pou jenere siyal la
+def get_signal(pair="EURUSD"):
+    # Ou ka modifye siyal la isit la oswa ajoute lojik avanse
+    return {
         "pair": pair,
-        "signal": "BUY",
+        "signal": "BUY",        # Ou ka chanje sa a selon kondisyon
         "timeframe": "1m",
         "confidence": "75%"
     }
 
+# Route pou siyal la
+@app.route("/signal")
+def signal():
+    pair = request.args.get("pair", "EURUSD")
+    data = get_signal(pair)
     return jsonify(data)
+
+if __name__ == "__main__":
+    # debug=True itil pou devlopman, li montre erè fasil
+    app.run(debug=True)
+
