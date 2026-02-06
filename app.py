@@ -16,3 +16,15 @@ def signal():
 
 if __name__ == "__main__":
     app.run()
+@app.route("/signal")
+def signal():
+    pair = request.args.get("pair", "EURUSD")
+
+    data = {
+        "pair": pair,
+        "signal": "BUY",
+        "timeframe": "1m",
+        "confidence": "75%"
+    }
+
+    return jsonify(data)
