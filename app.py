@@ -1,48 +1,88 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, jsonify, request, render_template_string
 import pandas as pd
 import numpy as np
-from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator
-import time
+import requests
+from datetime import datetime
+import pytz
 
+# ===============================
+# CONFIG
+# ===============================
+API_KEY = "METE_API_KEY_ALPHA_VANTAGE_LA"DBK8OKQL1JZL91QU"
+BALANCE = 100
+RISK = 0.03
+LOSS_LIMIT = 3
+signal_count = 0
+loss_count = 0
+MAX_SIGNALS = 5
+
+# ===============================
+# FLASK APP
+# ===============================
 app = Flask(__name__)
 
 # ===============================
-# CONFIG BINARY
+# SESSION FILTER
 # ===============================
-TIMEFRAME = "1m"
-MAX_SIGNALS = 5
-signal_count = 0
+def session_allowed():
+    tz = pytz.timezone("US/Eastern")
+    hour = datetime.now(tz).hour
+    return (3 <= hour <= 6) or (8 <= hour <= 11)
 
 # ===============================
-# FAKE MARKET DATA (SIMULATION)
+# LIVE DATA (1M)
 # ===============================
-def get_market_data():
-    prices = np.cumsum(np.random.randn(120)) + 100
-    return pd.DataFrame({"close": prices})
+def get_live_data(pair="EURUSD"):
+    url = "https://www.alphavantage.co/query"
+    params = {
+        "function": "FX_INTRADAY",
+        "from_symbol": pair[:3],
+        "to_symbol": pair[3:],
+        "interval": "1min",
+        "apikey": API_KEY,
+        "outputsize": "compact"
+    }
+    r = requests.get(url)
+    data = r.json().get("Time Series FX (1min)", {})
+    closes = [float(v["4. close"]) for v in data.values()]
+    return pd.DataFrame({"close": closes[::-1]})
 
 # ===============================
-# PAGE WEB (POCKET STYLE)
+# MARKET ANALYSIS
+# ===============================
+def analyze_market(df):
+    if len(df) < 20:
+        return "WAIT"
+
+    ma_fast = df["close"].rolling(5).mean()
+    ma_slow = df["close"].rolling(14).mean()
+    rsi = 100 - (100 / (1 + (df["close"].diff().clip(lower=0).rolling(14).mean() /
+                               df["close"].diff().clip(upper=0).abs().rolling(14).mean()))))
+
+    signal = "WAIT"
+    # EMA crossover + RSI oversold/overbought
+    if ma_fast.iloc[-2] < ma_slow.iloc[-2] and ma_fast.iloc[-1] > ma_slow.iloc[-1] and rsi.iloc[-1] < 35:
+        signal = "BUY"
+    elif ma_fast.iloc[-2] > ma_slow.iloc[-2] and ma_fast.iloc[-1] < ma_slow.iloc[-1] and rsi.iloc[-1] > 65:
+        signal = "SELL"
+    return signal
+
+# ===============================
+# WEB PAGE (POCKET STYLE)
 # ===============================
 @app.route("/")
 def home():
     html = """
     <!DOCTYPE html>
     <html>
-    <head>
-        <title>Binary Signal Bot 1M</title>
-    </head>
+    <head><title>Binary Signal Bot 1M</title></head>
     <body style="font-family: Arial; text-align: center; margin-top: 30px;">
         <h2>🔥 Binary Signal Bot (1 Minute)</h2>
         <p>Max signals per session: 5</p>
-
         <input id="pair" value="EURUSD"/><br><br>
-
         <button onclick="getSignal()">GET SIGNAL</button>
-
         <h3 id="result"></h3>
         <h4 id="timer"></h4>
-
         <script>
             function startCountdown(sec) {
                 let time = sec;
@@ -64,11 +104,11 @@ def home():
                     .then(d => {
                         document.getElementById("result").innerHTML =
                             "<b>PAIR:</b> " + d.pair + "<br>" +
-                            "<b>SIGNAL:</b> " + d.signal + "<br>" +
+                            "<b>SIGNAL:</b> " + d.decision + "<br>" +
                             "<b>ENTER:</b> Next Candle<br>" +
                             "<b>EXPIRATION:</b> 1 Minute<br>" +
                             "<b>CONFIDENCE:</b> " + d.confidence;
-                        if (d.signal !== "WAIT") {
+                        if (d.decision !== "WAIT") {
                             startCountdown(30);
                         }
                     });
@@ -80,43 +120,50 @@ def home():
     return render_template_string(html)
 
 # ===============================
-# BINARY SIGNAL LOGIC
+# SIGNAL ROUTE
 # ===============================
 @app.route("/signal")
 def signal():
-    global signal_count
+    global signal_count, loss_count
 
-    if signal_count >= MAX_SIGNALS:
+    pair = request.args.get("pair", "EURUSD")
+
+    # SESSION FILTER
+    if not session_allowed():
         return jsonify({
-            "signal": "SESSION LIMIT REACHED",
+            "pair": pair,
+            "decision": "WAIT",
+            "reason": "Outside trading session",
             "confidence": "—"
         })
 
-    df = get_market_data()
+    # MAX SIGNALS
+    if signal_count >= MAX_SIGNALS:
+        return jsonify({
+            "pair": pair,
+            "decision": "STOP",
+            "reason": "Max signals reached",
+            "confidence": "—"
+        })
 
-    rsi = RSIIndicator(df["close"], window=14).rsi().iloc[-1]
-    ema20 = EMAIndicator(df["close"], window=20).ema_indicator().iloc[-1]
-    ema50 = EMAIndicator(df["close"], window=50).ema_indicator().iloc[-1]
+    df = get_live_data(pair)
+    decision = analyze_market(df)
 
-    signal = "WAIT"
-    confidence = "LOW"
-
-    if ema20 > ema50 and rsi < 35:
-        signal = "BUY"
-        confidence = "HIGH"
+    if decision in ["BUY", "SELL"]:
         signal_count += 1
-
-    elif ema20 < ema50 and rsi > 65:
-        signal = "SELL"
         confidence = "HIGH"
-        signal_count += 1
+    else:
+        confidence = "LOW"
 
     return jsonify({
-        "pair": request.args.get("pair", "EURUSD"),
-        "signal": signal,
+        "pair": pair,
+        "decision": decision,
+        "expiration": "1m",
         "confidence": confidence
     })
 
+# ===============================
+# RUN APP
+# ===============================
 if __name__ == "__main__":
     app.run()
-
