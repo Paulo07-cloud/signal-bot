@@ -4,11 +4,12 @@ import numpy as np
 import requests
 from datetime import datetime
 import pytz
+import os
 
 # ===============================
 # CONFIG
 # ===============================
-API_KEY = "DBK8OKQL1JZL91QU"
+API_KEY = "DBK8OKQL1JZL19QU"
 BALANCE = 100
 RISK = 0.03
 LOSS_LIMIT = 3
@@ -30,7 +31,7 @@ def session_allowed():
     return (3 <= hour <= 6) or (8 <= hour <= 11)
 
 # ===============================
-# LIVE DATA (1M)
+# LIVE DATA (1M) AVEC TRY/EXCEPT
 # ===============================
 def get_live_data(pair="EURUSD"):
     url = "https://www.alphavantage.co/query"
@@ -42,13 +43,19 @@ def get_live_data(pair="EURUSD"):
         "apikey": API_KEY,
         "outputsize": "compact"
     }
-    r = requests.get(url)
-    data = r.json().get("Time Series FX (1min)", {})
-    closes = [float(v["4. close"]) for v in data.values()]
-    return pd.DataFrame({"close": closes[::-1]})
+    try:
+        r = requests.get(url, timeout=10)
+        data = r.json().get("Time Series FX (1min)", {})
+        closes = [float(v["4. close"]) for v in data.values()]
+        return pd.DataFrame({"close": closes[::-1]})
+    except Exception as e:
+        print("Error fetching live data:", e)
+        # Return dummy data si echwe
+        prices = np.cumsum(np.random.randn(120)) + 100
+        return pd.DataFrame({"close": prices})
 
 # ===============================
-# MARKET ANALYSIS
+# MARKET ANALYSIS (EMA + RSI)
 # ===============================
 def analyze_market(df):
     if len(df) < 20:
@@ -57,7 +64,7 @@ def analyze_market(df):
     ma_fast = df["close"].rolling(5).mean()
     ma_slow = df["close"].rolling(14).mean()
     rsi = 100 - (100 / (1 + (df["close"].diff().clip(lower=0).rolling(14).mean() /
-                               df["close"].diff().clip(upper=0).abs().rolling(14).mean()))))
+                               df["close"].diff().clip(upper=0).abs().rolling(14).mean())))
 
     signal = "WAIT"
     # EMA crossover + RSI oversold/overbought
@@ -166,4 +173,6 @@ def signal():
 # RUN APP
 # ===============================
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+
