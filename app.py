@@ -8,7 +8,7 @@ import pytz
 # ===============================
 # CONFIG
 # ===============================
-API_KEY = "METE_API_KEY_ALPHA_VANTAGE_LA"DBK8OKQL1JZL91QU"
+API_KEY = "DBK8OKQL1JZL91QU"
 BALANCE = 100
 RISK = 0.03
 LOSS_LIMIT = 3
